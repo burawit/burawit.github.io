@@ -463,6 +463,10 @@
             <div class="card">
                 <h2>แก้ไขข้อมูล Asset</h2>
                 <div class="field">
+                    <label>Asset No.</label>
+                    <input id="edit-asset" type="text" placeholder="เช่น 1174032510000">
+                </div>
+                <div class="field">
                     <label>สถานะอุปกรณ์</label>
                     <select id="edit-status">
                         <option value="ใช้งานปกติ">ใช้งานปกติ</option>
@@ -487,6 +491,46 @@
                 <div class="btn-row">
                     <button class="btn btn-ghost" onclick="showScreen('detail')">ยกเลิก</button>
                     <button class="btn btn-primary" id="save-btn" onclick="saveEdit()">บันทึก</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============ SCREEN: ADD NEW ============ -->
+        <section id="screen-add" class="screen">
+            <div class="card">
+                <h2>เพิ่ม Asset ใหม่</h2>
+                <div class="field">
+                    <label>Asset No.</label>
+                    <input id="add-asset" type="text" placeholder="เลขจาก barcode">
+                </div>
+                <div class="field">
+                    <label>Serial Number</label>
+                    <input id="add-sn" type="text" placeholder="เช่น FOC1751S1XG">
+                </div>
+                <div class="field">
+                    <label>รายการอุปกรณ์</label>
+                    <input id="add-detail" type="text" placeholder="เช่น CISCO CATALYST 2960">
+                </div>
+                <div class="field">
+                    <label>Application</label>
+                    <input id="add-app" type="text" placeholder="เช่น CMAL2CBMOP22">
+                </div>
+                <div class="field">
+                    <label>Site</label>
+                    <select id="add-site" onchange="addFillRooms()"></select>
+                </div>
+                <div class="field">
+                    <label>ห้อง / ตำแหน่งที่ตั้ง</label>
+                    <select id="add-room-select" onchange="onAddRoomSelect()" style="display:none"></select>
+                    <input id="add-room" type="text" placeholder="เช่น Server Room 1">
+                </div>
+                <div class="field">
+                    <label>หมายเหตุ</label>
+                    <textarea id="add-note" rows="2" placeholder="บันทึกเพิ่มเติม..."></textarea>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-ghost" onclick="showScreen('scan')">ยกเลิก</button>
+                    <button class="btn btn-primary" id="add-save-btn" onclick="saveNewAsset()">เพิ่ม Asset</button>
                 </div>
             </div>
         </section>
@@ -659,10 +703,15 @@
         <button class="btn btn-primary" onclick="openDetail()">ดูรายละเอียด</button>
       </div>`;
             } else {
+                lastNotFound = code;
                 box.innerHTML = `
       <div class="card" style="border-color:var(--red-700);">
         <div class="frow"><span class="k">Code ที่สแกนได้</span><span class="v">${esc(code)}</span></div>
         <div class="frow"><span class="k">สถานะ</span><span class="v"><span class="badge err">ไม่พบในทะเบียน</span></span></div>
+        <button class="btn btn-primary" onclick="openAdd()">➕ เพิ่ม Asset ใหม่ด้วยเลขนี้</button>
+        <p style="font-size:12px;color:var(--ink-3);margin-top:8px;text-align:center;">
+          หรือถ้ารู้ S/N ลองพิมพ์ค้นหาด้านบน — เจอแล้วกด "แก้ไข" เพื่อใส่เลข asset ได้
+        </p>
       </div>`;
             }
         }
@@ -722,6 +771,7 @@
         /* ---------- หน้าแก้ไข ---------- */
         function openEdit() {
             if (!current) return;
+            document.getElementById("edit-asset").value = current["Asset"] || "";
             document.getElementById("edit-status").value = current["Status"] || "ใช้งานปกติ";
             document.getElementById("edit-note").value = current["Note"] || "";
 
@@ -789,11 +839,102 @@
             }
         }
 
+        /* ---------- เพิ่ม Asset ใหม่ (จากการสแกนไม่เจอ) ---------- */
+        let lastNotFound = "";
+
+        function openAdd() {
+            // prefill เลขที่สแกนได้ (ตัดขีด/ช่องว่างออก)
+            document.getElementById("add-asset").value = (lastNotFound || "").replace(/[^0-9A-Za-z]/g, "");
+            document.getElementById("add-sn").value = "";
+            document.getElementById("add-detail").value = "";
+            document.getElementById("add-app").value = "";
+            document.getElementById("add-note").value = "";
+
+            const siteSel = document.getElementById("add-site");
+            const sites = [...new Set([
+                ...rooms.map(r => r["site_id"]),
+                ...assets.map(a => a["Site_Id"]),
+            ].filter(Boolean))].sort();
+            siteSel.innerHTML = sites.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+            addFillRooms();
+            showScreen("add");
+        }
+
+        function addFillRooms() {
+            const site = document.getElementById("add-site").value;
+            const roomSel = document.getElementById("add-room-select");
+            const roomInput = document.getElementById("add-room");
+            const list = roomsOfSite(site);
+            if (list.length) {
+                roomSel.innerHTML =
+                    list.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("") +
+                    `<option value="__other__">อื่นๆ (พิมพ์เอง)</option>`;
+                roomSel.style.display = "";
+                roomSel.value = list[0];
+                roomInput.style.display = "none";
+                roomInput.value = list[0];
+            } else {
+                roomSel.style.display = "none";
+                roomInput.style.display = "";
+                roomInput.value = "";
+            }
+        }
+
+        function onAddRoomSelect() {
+            const roomSel = document.getElementById("add-room-select");
+            const roomInput = document.getElementById("add-room");
+            if (roomSel.value === "__other__") {
+                roomInput.style.display = "";
+                roomInput.value = "";
+                roomInput.focus();
+            } else {
+                roomInput.style.display = "none";
+                roomInput.value = roomSel.value;
+            }
+        }
+
+        async function saveNewAsset() {
+            const asset = document.getElementById("add-asset").value.trim();
+            const sn = document.getElementById("add-sn").value.trim();
+            if (!asset && !sn) { toast("ต้องมี Asset No. หรือ S/N อย่างน้อย 1 อย่าง"); return; }
+            // กันเพิ่มซ้ำ
+            if (asset && findAsset(asset)) { toast("เลข asset นี้มีอยู่แล้วในทะเบียน"); return; }
+
+            const payload = {
+                action: "add",
+                asset: asset,
+                sn: sn,
+                detail: document.getElementById("add-detail").value.trim(),
+                app: document.getElementById("add-app").value.trim(),
+                site: document.getElementById("add-site").value,
+                room: document.getElementById("add-room").value.trim(),
+                note: document.getElementById("add-note").value,
+                user: getUser(),
+            };
+            const btn = document.getElementById("add-save-btn");
+            btn.disabled = true;
+            await postToSheet(payload, "เพิ่ม Asset แล้ว ✓", () => {
+                const obj = {
+                    "Asset": asset, "Site_Id": payload.site, "รายการอุปกรณ์": payload.detail,
+                    "S/N": sn, "Application": payload.app, "Room": payload.room,
+                    "Status": "ใช้งานปกติ", "Note": payload.note,
+                };
+                assets.push(obj);
+                current = obj;
+                addLocalLog("เพิ่ม", obj);
+                openDetail();
+            });
+            btn.disabled = false;
+        }
+
         async function saveEdit() {
             if (!current) return;
+            const newAsset = document.getElementById("edit-asset").value.trim();
             const payload = {
                 action: "update",
-                asset: current["Asset"],
+                key: current["Asset"],   // เลข asset เดิม — ใช้หาแถวใน Sheet
+                sn: current["S/N"],     // สำรอง: หาแถวด้วย S/N (กรณี asset เดิมว่าง/ซ้ำ)
+                asset: newAsset,           // เลข asset ใหม่ (แก้ได้)
                 site: document.getElementById("edit-site").value,
                 status: document.getElementById("edit-status").value,
                 room: document.getElementById("edit-room").value.trim(),
@@ -801,6 +942,7 @@
                 user: getUser(),
             };
             await postToSheet(payload, "บันทึกแล้ว ✓", () => {
+                current["Asset"] = newAsset;
                 current["Site_Id"] = payload.site;
                 current["Status"] = payload.status;
                 current["Room"] = payload.room;
@@ -854,7 +996,7 @@
             if (!logs.length) { box.innerHTML = `<p class="empty">ยังไม่มีประวัติ</p>`; return; }
             box.innerHTML = logs.map(l => `
     <div class="log-item">
-      <div class="log-dot" style="background:${l.action === "แก้ไข" ? "#d97706" : "#15803d"}"></div>
+      <div class="log-dot" style="background:${l.action === "แก้ไข" ? "#d97706" : l.action === "เพิ่ม" ? "#2563eb" : "#15803d"}"></div>
       <div class="log-body">
         <p>${esc(l.action)}: ${esc(l.name || l.asset)}</p>
         <span>${new Date(l.t).toLocaleString("th-TH")} · ${esc(l.site || "")}</span>
@@ -1015,7 +1157,7 @@
         function showScreen(name) {
             document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
             document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
-            const map = { scan: "scan", detail: "scan", edit: "scan", list: "list", history: "history" };
+            const map = { scan: "scan", detail: "scan", edit: "scan", add: "scan", list: "list", history: "history" };
             document.getElementById("screen-" + name).classList.add("active");
             const navBtn = document.getElementById("nav-" + (map[name] || name));
             if (navBtn) navBtn.classList.add("active");
