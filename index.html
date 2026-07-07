@@ -1037,27 +1037,27 @@
             const next = listFiltered.slice(listShown, listShown + LIST_CHUNK);
             if (!next.length) return;
             const start = listShown;
+            const old = document.getElementById("list-more");
+            if (old) { listObserver.unobserve(old); old.remove(); }
             box.insertAdjacentHTML("beforeend",
                 next.map((a, i) => listItemHtml(a, start + i)).join(""));
             listShown += next.length;
 
-            // แถบบอกสถานะท้ายรายการ
-            const old = document.getElementById("list-more");
-            if (old) old.remove();
+            // แถบบอกสถานะท้ายรายการ — ใช้เป็น sentinel ให้ observer เฝ้าดู
             box.insertAdjacentHTML("beforeend",
                 listShown < listFiltered.length
                     ? `<p id="list-more" class="empty" style="padding:14px 0;">แสดง ${listShown} จาก ${listFiltered.length} — เลื่อนลงเพื่อโหลดต่อ</p>`
                     : `<p id="list-more" class="empty" style="padding:14px 0;">ครบ ${listFiltered.length} รายการ</p>`);
+            if (listShown < listFiltered.length) {
+                listObserver.observe(document.getElementById("list-more"));
+            }
         }
 
-        /* โหลดเพิ่มเมื่อ scroll ใกล้ล่างสุด (เฉพาะตอนอยู่หน้ารายการ) */
-        document.querySelector("main").addEventListener("scroll", function () {
+        /* โหลดเพิ่มเมื่อแถบท้ายลิสต์โผล่เข้าจอ — ทำงานไม่ว่าตัว scroll จะเป็น element ไหน */
+        const listObserver = new IntersectionObserver((entries) => {
             if (!document.getElementById("screen-list").classList.contains("active")) return;
-            if (listShown >= listFiltered.length) return;
-            if (this.scrollTop + this.clientHeight >= this.scrollHeight - 300) {
-                appendListChunk();
-            }
-        });
+            if (entries.some(e => e.isIntersecting)) appendListChunk();
+        }, { rootMargin: "300px" });
 
         function openFromListIdx(idx) {
             const hit = listFiltered[idx];
