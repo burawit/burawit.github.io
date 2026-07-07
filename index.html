@@ -472,6 +472,7 @@
                         <option value="ใช้งานปกติ">ใช้งานปกติ</option>
                         <option value="ชำรุด">ชำรุด</option>
                         <option value="รอซ่อม">รอซ่อม</option>
+                        <option value="รอตัดจำหน่าย">รอตัดจำหน่าย</option>
                         <option value="จำหน่ายออก">จำหน่ายออก</option>
                     </select>
                 </div>
@@ -483,6 +484,11 @@
                     <label>ห้อง / ตำแหน่งที่ตั้ง <span id="room-hint" style="color:var(--ink-3)"></span></label>
                     <select id="edit-room-select" onchange="onRoomSelect()" style="display:none"></select>
                     <input id="edit-room" type="text" placeholder="เช่น Server Room 1">
+                </div>
+                <div class="field">
+                    <label>Rack</label>
+                    <select id="edit-rack-select" onchange="onRackSelect('edit')" style="display:none"></select>
+                    <input id="edit-rack" type="text" placeholder="None">
                 </div>
                 <div class="field">
                     <label>หมายเหตุ</label>
@@ -523,6 +529,11 @@
                     <label>ห้อง / ตำแหน่งที่ตั้ง</label>
                     <select id="add-room-select" onchange="onAddRoomSelect()" style="display:none"></select>
                     <input id="add-room" type="text" placeholder="เช่น Server Room 1">
+                </div>
+                <div class="field">
+                    <label>Rack</label>
+                    <select id="add-rack-select" onchange="onRackSelect('add')" style="display:none"></select>
+                    <input id="add-rack" type="text" placeholder="None">
                 </div>
                 <div class="field">
                     <label>หมายเหตุ</label>
@@ -586,6 +597,7 @@
         const SHEET_ID = "1d426tLoj0aZ3ViVFuzQCbAGUdibegsrueTidV3eqkCA";   // จาก URL ของ Google Sheets
         const SHEET_NAME = "Assets";                           // ชื่อแท็บใน Sheet
         const ROOMS_NAME = "Rooms";                            // แท็บ master ห้อง (site_id, room_name) — ไม่มีก็ได้
+        const RACKS_NAME = "Racks";                            // แท็บ master rack (site_id, room_name, rack_name) — ไม่มีก็ได้
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwbCiq0nwkdmIqtQVgwrlb1uxJq9uJ2rGbwniMrVNpGcpvbA9TYQhZkx8fLznGEiOA/exec";    // Web App URL จาก Apps Script (สำหรับบันทึก)
 
         /* ชื่อคอลัมน์ในแท็บ Assets — แก้ฝั่งขวาให้ตรงกับ header ใน Sheet ของคุณ */
@@ -596,6 +608,7 @@
             sn: "serial_number",   // Serial Number
             app: "application",     // Application
             room: "room",            // ห้อง (ผูกกับ Rooms.room_name)
+            rack: "rack",            // rack ในห้อง (ผูกกับ Racks.rack_name) — default None
             status: "status",          // สถานะอุปกรณ์
             note: "note",            // หมายเหตุ
         };
@@ -603,6 +616,7 @@
 
         let assets = [];          // ข้อมูลทั้งหมดจาก Google Sheets
         let rooms = [];           // master ห้อง: [{site_id, room_name}, ...]
+        let racks = [];           // master rack: [{site_id, room_name, rack_name}, ...]
         let current = null;       // asset ที่กำลังดูอยู่
         let codeReader = null;
         let scanning = false;
@@ -635,6 +649,7 @@
                     "S/N": r[COLS.sn] ?? "",
                     "Application": r[COLS.app] ?? "",
                     "Room": r[COLS.room] ?? "",
+                    "Rack": r[COLS.rack] ?? "",
                     "Status": r[COLS.status] ?? "",
                     "Note": r[COLS.note] ?? "",
                 })).filter(a => a["Asset"] || a["S/N"]);
@@ -671,6 +686,25 @@
                 .map(r => r["room_name"]);
         }
 
+        /* ---------- โหลด master rack (แท็บ Racks: site_id, room_name, rack_name) — ไม่มีแท็บนี้ก็ข้าม ---------- */
+        async function loadRacks() {
+            try {
+                racks = (await fetchSheet(RACKS_NAME)).filter(r => r["site_id"] && r["room_name"] && r["rack_name"]);
+                try { localStorage.setItem("racks_cache", JSON.stringify(racks)); } catch (e) { }
+            } catch (err) {
+                try { racks = JSON.parse(localStorage.getItem("racks_cache") || "[]"); } catch (e) { racks = []; }
+            }
+        }
+
+        /* ---------- รายชื่อ rack ของ site+ห้อง ---------- */
+        function racksOf(siteId, roomName) {
+            return racks
+                .filter(r =>
+                    (r["site_id"] || "").toLowerCase() === (siteId || "").toLowerCase() &&
+                    (r["room_name"] || "").toLowerCase() === (roomName || "").toLowerCase())
+                .map(r => r["rack_name"]);
+        }
+
         /* ---------- ค้นหา asset จาก barcode / ข้อความ ----------
            normalize: ตัดขีด/จุด/ช่องว่างออกก่อนเทียบ
            เช่น label "1-174-03253-0000" จะ match กับ "1174032530000" ใน Sheet */
@@ -678,20 +712,30 @@
             return String(s ?? "").replace(/[^0-9a-z]/gi, "").toLowerCase();
         }
         function findAsset(code) {
+            const all = findAssetsAll(code);
+            return all.length ? all[0] : null;
+        }
+
+        /* หา "ทุกตัว" ที่ตรง — เลข asset ซ้ำกันได้ (ตัวเก่ารอตัดจำหน่าย / ตัวใหม่ใช้เลขเดิม) */
+        function findAssetsAll(code) {
             const c = norm(code);
-            if (!c) return null;
-            return assets.find(a =>
-                norm(a["Asset"]) === c || norm(a["S/N"]) === c
-            ) || assets.find(a =>
-                (c.length >= 4) && (norm(a["Asset"]).includes(c) || norm(a["S/N"]).includes(c))
-            );
+            if (!c) return [];
+            const exact = assets.filter(a => norm(a["Asset"]) === c || norm(a["S/N"]) === c);
+            if (exact.length) return exact;
+            if (c.length >= 4)
+                return assets.filter(a => norm(a["Asset"]).includes(c) || norm(a["S/N"]).includes(c));
+            return [];
         }
 
         /* ---------- แสดงผลลัพธ์บนหน้าสแกน ---------- */
+        let scanMatches = [];
+
         function showResult(code) {
             const box = document.getElementById("scan-result");
-            const hit = findAsset(code);
-            if (hit) {
+            const matches = findAssetsAll(code);
+
+            if (matches.length === 1) {
+                const hit = matches[0];
                 current = hit;
                 if (navigator.vibrate) navigator.vibrate(80);
                 box.innerHTML = `
@@ -699,8 +743,24 @@
         <div class="frow"><span class="k">Asset No.</span><span class="v" style="color:var(--green-900)">${esc(hit["Asset"])}</span></div>
         <div class="frow"><span class="k">รายการ</span><span class="v">${esc(hit["รายการอุปกรณ์"])}</span></div>
         <div class="frow"><span class="k">Site</span><span class="v">${esc(hit["Site_Id"])}</span></div>
-        <div class="frow"><span class="k">สถานะ</span><span class="v"><span class="badge ok">พบข้อมูล</span></span></div>
+        <div class="frow"><span class="k">สถานะ</span>${statusBadge(hit["Status"] || "พบข้อมูล")}</div>
         <button class="btn btn-primary" onclick="openDetail()">ดูรายละเอียด</button>
+      </div>`;
+            } else if (matches.length > 1) {
+                // เลข asset ซ้ำได้ (ตัวเก่ารอตัดจำหน่าย / ตัวใหม่ใช้เลขเดิม) → ให้เลือกตัวที่ต้องการ
+                scanMatches = matches;
+                if (navigator.vibrate) navigator.vibrate(80);
+                box.innerHTML = `
+      <div class="card" style="border-color:var(--green-700);">
+        <h2>พบ ${matches.length} รายการ — เลือกตัวที่ต้องการ</h2>
+        ${matches.map((a, i) => `
+          <div class="log-item" style="cursor:pointer" onclick="openMatch(${i})">
+            <div class="log-body">
+              <p>${esc(a["รายการอุปกรณ์"] || "(ไม่มีชื่อรายการ)")}</p>
+              <span>S/N: ${esc(a["S/N"] || "-")} · ${esc(a["Site_Id"])}${a["Rack"] && a["Rack"] !== "None" ? " · " + esc(a["Rack"]) : ""}</span>
+            </div>
+            ${statusBadge(a["Status"] || "-").replace('class="v"', 'class="v" style="margin-left:auto;flex-shrink:0;"')}
+          </div>`).join("")}
       </div>`;
             } else {
                 lastNotFound = code;
@@ -716,6 +776,10 @@
             }
         }
 
+        function openMatch(i) {
+            if (scanMatches[i]) { current = scanMatches[i]; openDetail(); }
+        }
+
         function manualSearch() {
             const v = document.getElementById("manual-input").value;
             if (v.trim()) showResult(v);
@@ -724,8 +788,9 @@
         /* ---------- หน้ารายละเอียด ---------- */
         function statusBadge(status) {
             const s = status || "";
-            if (!s) return `<span class="v">-</span>`;
-            const cls = s === "ใช้งานปกติ" ? "ok" : (s === "จำหน่ายออก" ? "err" : "warn");
+            if (!s || s === "-") return `<span class="v">-</span>`;
+            const cls = (s === "ใช้งานปกติ" || s === "พบข้อมูล") ? "ok"
+                : (s === "จำหน่ายออก") ? "err" : "warn";
             return `<span class="v"><span class="badge ${cls}">${esc(s)}</span></span>`;
         }
 
@@ -756,6 +821,7 @@
       <h2>สถานที่ / สถานะ</h2>
       <div class="frow"><span class="k">Site</span><span class="v">${esc(a["Site_Id"])}</span></div>
       <div class="frow"><span class="k">ห้อง</span><span class="v">${esc(a["Room"] || "-")}</span></div>
+      <div class="frow"><span class="k">Rack</span><span class="v">${esc(a["Rack"] || "None")}</span></div>
       <div class="frow"><span class="k">สถานะ</span>${statusBadge(a["Status"])}</div>
       <div class="frow"><span class="k">หมายเหตุ</span><span class="v">${esc(a["Note"] || "-")}</span></div>
       ${lastHtml}
@@ -785,6 +851,7 @@
             siteSel.value = current["Site_Id"] || sites[0] || "";
 
             fillRoomOptions(current["Room"] || "");
+            fillRackOptions("edit", current["Rack"] || "None");
             showScreen("edit");
         }
 
@@ -824,6 +891,7 @@
                 if (typeof preselect === "string") roomInput.value = preselect;
                 hint.textContent = rooms.length ? `(ไม่มีห้องใน master สำหรับ ${site})` : "";
             }
+            fillRackOptions("edit");
         }
 
         function onRoomSelect() {
@@ -836,6 +904,55 @@
             } else {
                 roomInput.style.display = "none";
                 roomInput.value = roomSel.value;
+            }
+            fillRackOptions("edit");
+        }
+
+        /* ---------- Cascading dropdown: Site+ห้อง → Rack (default None) ---------- */
+        function fillRackOptions(prefix, preselect) {
+            const site = document.getElementById(prefix + "-site").value;
+            const room = document.getElementById(prefix + "-room").value;
+            const rackSel = document.getElementById(prefix + "-rack-select");
+            const rackInput = document.getElementById(prefix + "-rack");
+            const list = racksOf(site, room);
+
+            if (list.length) {
+                rackSel.innerHTML =
+                    `<option value="None">None</option>` +
+                    list.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("") +
+                    `<option value="__other__">อื่นๆ (พิมพ์เอง)</option>`;
+                rackSel.style.display = "";
+                const cur = preselect ?? rackInput.value;
+                if (cur && (cur === "None" || list.includes(cur))) {
+                    rackSel.value = cur;
+                    rackInput.style.display = "none";
+                    rackInput.value = cur;
+                } else if (cur) {
+                    rackSel.value = "__other__";
+                    rackInput.style.display = "";
+                    rackInput.value = cur;
+                } else {
+                    rackSel.value = "None";
+                    rackInput.style.display = "none";
+                    rackInput.value = "None";
+                }
+            } else {
+                rackSel.style.display = "none";
+                rackInput.style.display = "";
+                rackInput.value = (typeof preselect === "string" && preselect) ? preselect : (rackInput.value || "None");
+            }
+        }
+
+        function onRackSelect(prefix) {
+            const rackSel = document.getElementById(prefix + "-rack-select");
+            const rackInput = document.getElementById(prefix + "-rack");
+            if (rackSel.value === "__other__") {
+                rackInput.style.display = "";
+                rackInput.value = "";
+                rackInput.focus();
+            } else {
+                rackInput.style.display = "none";
+                rackInput.value = rackSel.value;
             }
         }
 
@@ -878,6 +995,7 @@
                 roomInput.style.display = "";
                 roomInput.value = "";
             }
+            fillRackOptions("add", "None");
         }
 
         function onAddRoomSelect() {
@@ -891,14 +1009,27 @@
                 roomInput.style.display = "none";
                 roomInput.value = roomSel.value;
             }
+            fillRackOptions("add", "None");
         }
 
         async function saveNewAsset() {
             const asset = document.getElementById("add-asset").value.trim();
             const sn = document.getElementById("add-sn").value.trim();
             if (!asset && !sn) { toast("ต้องมี Asset No. หรือ S/N อย่างน้อย 1 อย่าง"); return; }
-            // กันเพิ่มซ้ำ
-            if (asset && findAsset(asset)) { toast("เลข asset นี้มีอยู่แล้วในทะเบียน"); return; }
+
+            // เลข asset ซ้ำได้ (ตัวใหม่มาแทนตัวเก่าที่รอตัดจำหน่าย) — แต่เตือนให้ยืนยันก่อน
+            if (asset) {
+                const dup = assets.filter(a => norm(a["Asset"]) === norm(asset));
+                if (dup.length) {
+                    const info = dup.map(d => `• ${d["รายการอุปกรณ์"] || "?"} (${d["Status"] || "ไม่ระบุสถานะ"})`).join("\n");
+                    if (!confirm(`เลข asset นี้มีอยู่แล้ว ${dup.length} รายการ:\n${info}\n\nเพิ่มเป็นรายการใหม่ (เครื่องทดแทน) ใช่ไหม?\nแนะนำ: เปลี่ยนสถานะตัวเก่าเป็น "รอตัดจำหน่าย" ด้วย`)) return;
+                }
+            }
+            // S/N ต้องไม่ซ้ำ — คนละเครื่องกันย่อมมี S/N ต่างกัน
+            if (sn && assets.some(a => norm(a["S/N"]) === norm(sn))) {
+                toast("S/N นี้มีอยู่แล้วในทะเบียน — ลองค้นหาดูก่อน");
+                return;
+            }
 
             const payload = {
                 action: "add",
@@ -908,6 +1039,7 @@
                 app: document.getElementById("add-app").value.trim(),
                 site: document.getElementById("add-site").value,
                 room: document.getElementById("add-room").value.trim(),
+                rack: document.getElementById("add-rack").value.trim() || "None",
                 note: document.getElementById("add-note").value,
                 user: getUser(),
             };
@@ -917,7 +1049,7 @@
                 const obj = {
                     "Asset": asset, "Site_Id": payload.site, "รายการอุปกรณ์": payload.detail,
                     "S/N": sn, "Application": payload.app, "Room": payload.room,
-                    "Status": "ใช้งานปกติ", "Note": payload.note,
+                    "Rack": payload.rack, "Status": "ใช้งานปกติ", "Note": payload.note,
                 };
                 assets.push(obj);
                 current = obj;
@@ -938,6 +1070,7 @@
                 site: document.getElementById("edit-site").value,
                 status: document.getElementById("edit-status").value,
                 room: document.getElementById("edit-room").value.trim(),
+                rack: document.getElementById("edit-rack").value.trim() || "None",
                 note: document.getElementById("edit-note").value,
                 user: getUser(),
             };
@@ -946,6 +1079,7 @@
                 current["Site_Id"] = payload.site;
                 current["Status"] = payload.status;
                 current["Room"] = payload.room;
+                current["Rack"] = payload.rack;
                 current["Note"] = payload.note;
                 addLocalLog("แก้ไข", current);
                 openDetail();
@@ -1233,7 +1367,7 @@
         });
 
         /* ---------- Init ---------- */
-        Promise.all([loadAssets(), loadRooms()]).then(() => startScanner());
+        Promise.all([loadAssets(), loadRooms(), loadRacks()]).then(() => startScanner());
     </script>
 </body>
 
