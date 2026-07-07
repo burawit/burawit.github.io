@@ -1004,25 +1004,63 @@
     </div>`).join("");
         }
 
-        /* ---------- หน้ารายการทั้งหมด ---------- */
+        /* ---------- หน้ารายการทั้งหมด (lazy load ทีละ 50 รายการตอน scroll) ---------- */
+        const LIST_CHUNK = 50;
+        let listFiltered = [];   // ผลการกรองทั้งหมด (search กรองจากข้อมูลเต็มเสมอ)
+        let listShown = 0;       // จำนวนที่วาดไปแล้ว
+
+        function listItemHtml(a, idx) {
+            return `
+    <div class="log-item" style="cursor:pointer" onclick="openFromListIdx(${idx})">
+      <div class="log-body">
+        <p>${esc(a["รายการอุปกรณ์"] || "(ไม่มีชื่อรายการ)")}</p>
+        <span>${esc(a["Asset"] || "ไม่มีเลข asset")} · ${esc(a["Site_Id"])}</span>
+      </div>
+    </div>`;
+        }
+
         function renderList(filter) {
             const box = document.getElementById("list-body");
             const f = (filter || "").toLowerCase();
-            const rows = assets.filter(a =>
-                !f || Object.values(a).some(v => v.toLowerCase().includes(f))
-            ).slice(0, 100);
-            if (!rows.length) { box.innerHTML = `<p class="empty">ไม่พบรายการ</p>`; return; }
-            box.innerHTML = rows.map((a, i) => `
-    <div class="log-item" style="cursor:pointer" onclick="openFromList('${esc(a["Asset"])}')">
-      <div class="log-body">
-        <p>${esc(a["รายการอุปกรณ์"])}</p>
-        <span>${esc(a["Asset"])} · ${esc(a["Site_Id"])}</span>
-      </div>
-    </div>`).join("");
+            // กรองจากข้อมูลทั้งหมดเสมอ — lazy load มีผลแค่ตอนวาด ไม่กระทบการค้นหา
+            listFiltered = assets.filter(a =>
+                !f || Object.values(a).some(v => String(v).toLowerCase().includes(f))
+            );
+            listShown = 0;
+            if (!listFiltered.length) { box.innerHTML = `<p class="empty">ไม่พบรายการ</p>`; return; }
+            box.innerHTML = "";
+            appendListChunk();
         }
 
-        function openFromList(assetNo) {
-            const hit = assets.find(a => a["Asset"] === assetNo);
+        function appendListChunk() {
+            const box = document.getElementById("list-body");
+            const next = listFiltered.slice(listShown, listShown + LIST_CHUNK);
+            if (!next.length) return;
+            const start = listShown;
+            box.insertAdjacentHTML("beforeend",
+                next.map((a, i) => listItemHtml(a, start + i)).join(""));
+            listShown += next.length;
+
+            // แถบบอกสถานะท้ายรายการ
+            const old = document.getElementById("list-more");
+            if (old) old.remove();
+            box.insertAdjacentHTML("beforeend",
+                listShown < listFiltered.length
+                    ? `<p id="list-more" class="empty" style="padding:14px 0;">แสดง ${listShown} จาก ${listFiltered.length} — เลื่อนลงเพื่อโหลดต่อ</p>`
+                    : `<p id="list-more" class="empty" style="padding:14px 0;">ครบ ${listFiltered.length} รายการ</p>`);
+        }
+
+        /* โหลดเพิ่มเมื่อ scroll ใกล้ล่างสุด (เฉพาะตอนอยู่หน้ารายการ) */
+        document.querySelector("main").addEventListener("scroll", function () {
+            if (!document.getElementById("screen-list").classList.contains("active")) return;
+            if (listShown >= listFiltered.length) return;
+            if (this.scrollTop + this.clientHeight >= this.scrollHeight - 300) {
+                appendListChunk();
+            }
+        });
+
+        function openFromListIdx(idx) {
+            const hit = listFiltered[idx];
             if (hit) { current = hit; openDetail(); }
         }
 
