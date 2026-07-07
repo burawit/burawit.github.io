@@ -470,7 +470,12 @@
                     </select>
                 </div>
                 <div class="field">
-                    <label>ห้อง / ตำแหน่งที่ตั้ง</label>
+                    <label>Site</label>
+                    <select id="edit-site" onchange="fillRoomOptions()"></select>
+                </div>
+                <div class="field">
+                    <label>ห้อง / ตำแหน่งที่ตั้ง <span id="room-hint" style="color:var(--ink-3)"></span></label>
+                    <select id="edit-room-select" onchange="onRoomSelect()" style="display:none"></select>
                     <input id="edit-room" type="text" placeholder="เช่น Server Room 1">
                 </div>
                 <div class="field">
@@ -532,31 +537,37 @@
         /* ================================================================
            CONFIG — แก้ 2 ค่านี้ก่อนใช้งาน
            ================================================================ */
-        const SHEET_ID = "1d426tLoj0aZ3ViVFuzQCbAGUdibegsrueTidV3eqkCA";   // จาก URL ของ Google Sheets
+        const SHEET_ID = "PUT_YOUR_GOOGLE_SHEET_ID_HERE";   // จาก URL ของ Google Sheets
         const SHEET_NAME = "Assets";                           // ชื่อแท็บใน Sheet
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwbCiq0nwkdmIqtQVgwrlb1uxJq9uJ2rGbwniMrVNpGcpvbA9TYQhZkx8fLznGEiOA/exec";    // Web App URL จาก Apps Script (สำหรับบันทึก)
+        const ROOMS_NAME = "Rooms";                            // แท็บ master ห้อง (site_id, room_name) — ไม่มีก็ได้
+        const SCRIPT_URL = "PUT_YOUR_APPS_SCRIPT_URL_HERE";    // Web App URL จาก Apps Script (สำหรับบันทึก)
         /* ================================================================ */
 
         let assets = [];          // ข้อมูลทั้งหมดจาก Google Sheets
+        let rooms = [];           // master ห้อง: [{site_id, room_name}, ...]
         let current = null;       // asset ที่กำลังดูอยู่
         let codeReader = null;
         let scanning = false;
 
-        /* ---------- โหลดข้อมูลจาก Google Sheets (gviz JSON, sheet ต้อง public read) ---------- */
+        /* ---------- ดึงข้อมูลแท็บใดๆ จาก Google Sheets (gviz JSON, sheet ต้อง public read) ---------- */
+        async function fetchSheet(sheetName) {
+            const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+            const res = await fetch(url);
+            const text = await res.text();
+            // gviz ห่อ JSON ด้วย function call — ตัดหัวท้ายออก
+            const json = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
+            const cols = json.table.cols.map(c => (c.label || c.id || "").trim());
+            return json.table.rows.map(r => {
+                const obj = {};
+                cols.forEach((c, i) => obj[c] = r.c[i] ? String(r.c[i].v ?? "").trim() : "");
+                return obj;
+            });
+        }
+
         async function loadAssets() {
             const sub = document.getElementById("header-sub");
             try {
-                const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}`;
-                const res = await fetch(url);
-                const text = await res.text();
-                // gviz ห่อ JSON ด้วย function call — ตัดหัวท้ายออก
-                const json = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
-                const cols = json.table.cols.map(c => (c.label || c.id || "").trim());
-                assets = json.table.rows.map(r => {
-                    const obj = {};
-                    cols.forEach((c, i) => obj[c] = r.c[i] ? String(r.c[i].v ?? "").trim() : "");
-                    return obj;
-                }).filter(a => a["Asset"] || a["S/N"]);
+                assets = (await fetchSheet(SHEET_NAME)).filter(a => a["Asset"] || a["S/N"]);
                 sub.textContent = `${assets.length} รายการ · อัปเดต ${new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}`;
                 try { localStorage.setItem("assets_cache", JSON.stringify(assets)); } catch (e) { }
             } catch (err) {
@@ -571,6 +582,23 @@
                 } catch (e) { }
                 sub.textContent = "โหลดข้อมูลไม่ได้ — ตรวจสอบ SHEET_ID และการแชร์";
             }
+        }
+
+        /* ---------- โหลด master ห้อง (แท็บ Rooms: site_id, room_name) — ไม่มีแท็บนี้ก็ข้าม ---------- */
+        async function loadRooms() {
+            try {
+                rooms = (await fetchSheet(ROOMS_NAME)).filter(r => r["site_id"] && r["room_name"]);
+                try { localStorage.setItem("rooms_cache", JSON.stringify(rooms)); } catch (e) { }
+            } catch (err) {
+                try { rooms = JSON.parse(localStorage.getItem("rooms_cache") || "[]"); } catch (e) { rooms = []; }
+            }
+        }
+
+        /* ---------- รายชื่อห้องของ site หนึ่งๆ ---------- */
+        function roomsOfSite(siteId) {
+            return rooms
+                .filter(r => (r["site_id"] || "").toLowerCase() === (siteId || "").toLowerCase())
+                .map(r => r["room_name"]);
         }
 
         /* ---------- ค้นหา asset จาก barcode / ข้อความ ---------- */
@@ -615,9 +643,28 @@
         }
 
         /* ---------- หน้ารายละเอียด ---------- */
+        function statusBadge(status) {
+            const s = status || "";
+            if (!s) return `<span class="v">-</span>`;
+            const cls = s === "ใช้งานปกติ" ? "ok" : (s === "จำหน่ายออก" ? "err" : "warn");
+            return `<span class="v"><span class="badge ${cls}">${esc(s)}</span></span>`;
+        }
+
+        /* หาการตรวจสอบล่าสุดของ asset นี้จาก log ในเครื่อง */
+        function lastCheckOf(assetNo) {
+            try {
+                const logs = JSON.parse(localStorage.getItem("audit_log") || "[]");
+                return logs.find(l => l.asset === assetNo && l.action === "ตรวจสอบ") || null;
+            } catch (e) { return null; }
+        }
+
         function openDetail() {
             if (!current) return;
             const a = current;
+            const last = lastCheckOf(a["Asset"]);
+            const lastHtml = last
+                ? `<div class="frow"><span class="k">ตรวจสอบล่าสุด</span><span class="v">${new Date(last.t).toLocaleString("th-TH")}</span></div>`
+                : `<div class="frow"><span class="k">ตรวจสอบล่าสุด</span><span class="v"><span class="badge warn">ยังไม่เคยตรวจ (เครื่องนี้)</span></span></div>`;
             document.getElementById("detail-body").innerHTML = `
     <div class="card">
       <h2>ข้อมูลอุปกรณ์</h2>
@@ -630,8 +677,9 @@
       <h2>สถานที่ / สถานะ</h2>
       <div class="frow"><span class="k">Site</span><span class="v">${esc(a["Site_Id"])}</span></div>
       <div class="frow"><span class="k">ห้อง</span><span class="v">${esc(a["Room"] || "-")}</span></div>
-      <div class="frow"><span class="k">สถานะ</span><span class="v">${esc(a["Status"] || "-")}</span></div>
+      <div class="frow"><span class="k">สถานะ</span>${statusBadge(a["Status"])}</div>
       <div class="frow"><span class="k">หมายเหตุ</span><span class="v">${esc(a["Note"] || "-")}</span></div>
+      ${lastHtml}
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="openEdit()">แก้ไข</button>
@@ -645,9 +693,70 @@
         function openEdit() {
             if (!current) return;
             document.getElementById("edit-status").value = current["Status"] || "ใช้งานปกติ";
-            document.getElementById("edit-room").value = current["Room"] || "";
             document.getElementById("edit-note").value = current["Note"] || "";
+
+            // Site dropdown: รวม site จาก master Rooms + จากข้อมูล assets
+            const siteSel = document.getElementById("edit-site");
+            const sites = [...new Set([
+                ...rooms.map(r => r["site_id"]),
+                ...assets.map(a => a["Site_Id"]),
+            ].filter(Boolean))].sort();
+            siteSel.innerHTML = sites.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+            siteSel.value = current["Site_Id"] || sites[0] || "";
+
+            fillRoomOptions(current["Room"] || "");
             showScreen("edit");
+        }
+
+        /* ---------- Cascading dropdown: Site → ห้อง ---------- */
+        function fillRoomOptions(preselect) {
+            const site = document.getElementById("edit-site").value;
+            const roomSel = document.getElementById("edit-room-select");
+            const roomInput = document.getElementById("edit-room");
+            const hint = document.getElementById("room-hint");
+            const list = roomsOfSite(site);
+
+            if (list.length) {
+                // มี master ห้องของ site นี้ → ใช้ dropdown, มีตัวเลือก "อื่นๆ" ให้พิมพ์เอง
+                roomSel.innerHTML =
+                    list.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("") +
+                    `<option value="__other__">อื่นๆ (พิมพ์เอง)</option>`;
+                roomSel.style.display = "";
+                const cur = preselect ?? roomInput.value;
+                if (cur && list.includes(cur)) {
+                    roomSel.value = cur;
+                    roomInput.style.display = "none";
+                    roomInput.value = cur;
+                } else if (cur) {
+                    roomSel.value = "__other__";
+                    roomInput.style.display = "";
+                    roomInput.value = cur;
+                } else {
+                    roomSel.value = list[0];
+                    roomInput.style.display = "none";
+                    roomInput.value = list[0];
+                }
+                hint.textContent = `(กรองตาม ${site})`;
+            } else {
+                // ไม่มี master → ใช้ช่องพิมพ์อย่างเดียว
+                roomSel.style.display = "none";
+                roomInput.style.display = "";
+                if (typeof preselect === "string") roomInput.value = preselect;
+                hint.textContent = rooms.length ? `(ไม่มีห้องใน master สำหรับ ${site})` : "";
+            }
+        }
+
+        function onRoomSelect() {
+            const roomSel = document.getElementById("edit-room-select");
+            const roomInput = document.getElementById("edit-room");
+            if (roomSel.value === "__other__") {
+                roomInput.style.display = "";
+                roomInput.value = "";
+                roomInput.focus();
+            } else {
+                roomInput.style.display = "none";
+                roomInput.value = roomSel.value;
+            }
         }
 
         async function saveEdit() {
@@ -655,12 +764,14 @@
             const payload = {
                 action: "update",
                 asset: current["Asset"],
+                site: document.getElementById("edit-site").value,
                 status: document.getElementById("edit-status").value,
-                room: document.getElementById("edit-room").value,
+                room: document.getElementById("edit-room").value.trim(),
                 note: document.getElementById("edit-note").value,
                 user: getUser(),
             };
             await postToSheet(payload, "บันทึกแล้ว ✓", () => {
+                current["Site_Id"] = payload.site;
                 current["Status"] = payload.status;
                 current["Room"] = payload.room;
                 current["Note"] = payload.note;
@@ -812,7 +923,7 @@
         });
 
         /* ---------- Init ---------- */
-        loadAssets().then(() => startScanner());
+        Promise.all([loadAssets(), loadRooms()]).then(() => startScanner());
     </script>
 </body>
 

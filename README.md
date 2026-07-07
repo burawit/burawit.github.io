@@ -1,156 +1,75 @@
-# 🌟 Project Name
+# Asset Scanner — คู่มือติดตั้ง
 
-> A short description of your project goes here.
-
-[![GitHub Pages](https://img.shields.io/badge/Demo-Live-success?style=for-the-badge)](https://yourusername.github.io/repository-name/)
-[![License](https://img.shields.io/github/license/yourusername/repository-name?style=for-the-badge)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/yourusername/repository-name?style=for-the-badge)](https://github.com/yourusername/repository-name/stargazers)
-
----
-
-## 📖 Overview
-
-This project demonstrates **what your application does** and why it exists.
-
-### ✨ Features
-
-- 🚀 Fast and lightweight
-- 🎨 Responsive design
-- 📊 Interactive visualizations
-- 🌙 Dark mode support
-- 📱 Mobile-friendly
-
----
-
-## 📷 Preview
-
-<p align="center">
-    <img src="docs/images/demo.png" width="900" alt="Project Screenshot">
-</p>
-
-> Replace the image with a screenshot or GIF of your project.
-
----
-
-## 🌐 Live Demo
-
-👉 **https://yourusername.github.io/repository-name/**
-
----
-
-## 🛠️ Built With
-
-| Technology | Purpose |
-|------------|---------|
-| HTML5 | Structure |
-| CSS3 | Styling |
-| JavaScript | Logic |
-| Bootstrap / Tailwind | UI Framework |
-| Chart.js / D3.js | Visualization |
-
----
-
-## 🚀 Getting Started
-
-Clone the repository
-
-```bash
-git clone https://github.com/yourusername/repository-name.git
-```
-
-Open the project
-
-```bash
-cd repository-name
-```
-
-If using a local server:
-
-```bash
-python -m http.server 8000
-```
-
-Then open
+## ภาพรวม
 
 ```
-http://localhost:8000
+มือถือ (Browser)
+   │
+   ├── อ่านข้อมูล ◄── Google Sheets (public read, ไม่ต้อง login)
+   └── เขียนข้อมูล ──► Google Apps Script Web App ──► Google Sheets
 ```
 
----
+## ขั้นตอนที่ 1 — เตรียม Google Sheets
 
-## 📂 Project Structure
+1. สร้าง Google Sheets ใหม่
+2. เปลี่ยนชื่อแท็บแรกเป็น `Assets`
+3. Import ไฟล์ `combined_assets.csv` (File → Import → Upload → Replace current sheet)
+4. ตรวจสอบว่า header row มีคอลัมน์: `Site_Id, ลำดับ, รายการอุปกรณ์, Asset, S/N, Application`
+5. **แชร์แบบ public read:** Share → General access → "Anyone with the link" → **Viewer**
+6. จด **Sheet ID** จาก URL:
+   ```
+   https://docs.google.com/spreadsheets/d/【นี่คือ SHEET_ID】/edit
+   ```
 
-```
-repository-name/
-│
-├── index.html
-├── README.md
-├── assets/
-│   ├── css/
-│   ├── js/
-│   └── images/
-│
-├── docs/
-│   └── images/
-│       └── demo.png
-│
-└── data/
-```
+## ขั้นตอนที่ 2 — ติดตั้ง Apps Script (สำหรับบันทึกข้อมูล)
 
----
+1. ใน Google Sheets เดิม → Extensions → **Apps Script**
+2. ลบโค้ดเดิม วางโค้ดจากไฟล์ `Code.gs` ทั้งหมด
+3. กด Deploy → **New deployment** → เลือก type **Web app**
+   - Description: Asset Scanner API
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+4. กด Deploy → อนุญาตสิทธิ์ (Authorize) → copy **Web App URL**
+   - หน้าตา: `https://script.google.com/macros/s/XXXXX/exec`
 
-## 🎯 Roadmap
+## ขั้นตอนที่ 3 — ตั้งค่า index.html
 
-- [x] Initial release
-- [x] Responsive layout
-- [ ] Dark mode
-- [ ] Export to PDF
-- [ ] More charts
-- [ ] Performance improvements
+เปิดไฟล์ `index.html` แก้ 2 บรรทัดนี้ (อยู่ใน `<script>` ส่วน CONFIG):
 
----
-
-## 🤝 Contributing
-
-Contributions are welcome!
-
-1. Fork the repository
-2. Create a feature branch
-
-```bash
-git checkout -b feature/new-feature
+```javascript
+const SHEET_ID   = "ใส่ Sheet ID จากขั้นตอนที่ 1";
+const SCRIPT_URL = "ใส่ Web App URL จากขั้นตอนที่ 2";
 ```
 
-3. Commit your changes
+## ขั้นตอนที่ 4 — Deploy บน GitHub Pages
 
-```bash
-git commit -m "Add new feature"
-```
+1. สร้าง repo ใหม่บน GitHub (เช่น `asset-scanner`)
+2. Upload `index.html` เข้า repo
+3. Settings → Pages → Source: **Deploy from a branch** → Branch: `main` → Save
+4. รอสักครู่ ได้ URL: `https://username.github.io/asset-scanner/`
 
-4. Push
+> ⚠️ **กล้องใช้ได้เฉพาะ HTTPS** — GitHub Pages เป็น HTTPS อยู่แล้ว
+> ถ้าทดสอบในเครื่องให้ใช้ `localhost` (ถือว่า secure context)
 
-```bash
-git push origin feature/new-feature
-```
+## ขั้นตอนที่ 5 — ติดตั้งบนมือถือ (แบบ PWA)
 
-5. Open a Pull Request
+- **Android (Chrome):** เปิด URL → เมนู ⋮ → "Add to Home screen"
+- **iOS (Safari):** เปิด URL → ปุ่ม Share → "Add to Home Screen"
 
----
+## ฟีเจอร์
 
-## ⭐ Support
+| ฟีเจอร์ | รายละเอียด |
+|---------|-----------|
+| สแกน Barcode/QR | ZXing-js ผ่านกล้องหลัง รองรับ Code128, EAN, QR ฯลฯ |
+| ค้นหาด้วยมือ | พิมพ์ Asset No. หรือ S/N (รองรับค้นหาบางส่วน) |
+| ดูรายละเอียด | ข้อมูลครบทุกคอลัมน์จาก Sheet |
+| แก้ไข | Status / Room / Note → เขียนกลับเข้า Sheet |
+| ตรวจสอบแล้ว ✓ | บันทึกการตรวจนับลงแท็บ AuditLog |
+| ประวัติ | Log ฝั่งเครื่อง (localStorage) + log กลางใน Sheet |
+| Offline | Cache ข้อมูลล่าสุดไว้ ใช้ค้นหาได้แม้ไม่มีเน็ต |
 
-If you like this project, please consider giving it a ⭐ on GitHub.
+## ข้อจำกัดที่ควรรู้
 
----
-
-## 📄 License
-
-Distributed under the MIT License.
-
-See `LICENSE` for more information.
-
----
-
-<p align="center">
-Made with ❤️ by <b>Your Name</b>
-</p>
+- ข้อมูลใน Sheet เป็น **public read** — ใครมีลิงก์ก็อ่านได้ อย่าเก็บข้อมูลลับ
+- Apps Script Web App เปิดแบบ Anyone — มีชื่อ user ใน log แต่ไม่ได้ verify ตัวตนจริง
+- ถ้าต้องการความปลอดภัยสูงขึ้นภายหลัง → ย้ายไป Supabase (มี auth จริง) ได้โดยแก้แค่ส่วน loadAssets/postToSheet
