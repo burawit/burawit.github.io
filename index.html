@@ -890,8 +890,14 @@
         async function startScanner() {
             if (scanning) return;
             try {
-                // TRY_HARDER ช่วย decode ภาพนิ่งเฟรมเดียว (ยังรองรับทุก format เหมือนเดิม)
+                // จำกัด format ให้ตรงกับ label จริง (ยืนยันแล้วว่าเป็น CODE 93) → decode แม่นและเร็วขึ้นมาก
                 const hints = new Map();
+                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                    ZXing.BarcodeFormat.CODE_93,
+                    ZXing.BarcodeFormat.CODE_128,
+                    ZXing.BarcodeFormat.CODE_39,
+                    ZXing.BarcodeFormat.QR_CODE,
+                ]);
                 hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
                 codeReader = new ZXing.BrowserMultiFormatReader(hints);
                 const devices = await codeReader.listVideoInputDevices();
@@ -918,26 +924,80 @@
             }
         }
 
-        /* กดปุ่มถ่าย → จับภาพจาก video 1 เฟรม → decode เฉพาะภาพนั้น */
+        /* กดปุ่มสแกน → ลอง decode ต่อเนื่องสูงสุด ~4 วินาที (หลายเฟรม + หลายมุมมอง) เจอแล้วหยุดทันที */
+        let capturing = false;
+
+        /* decode 1 canvas ผ่าน decodeFromImageUrl (เมธอดที่มีจริงใน ZXing UMD build นี้) */
+        async function decodeCanvas(canvas) {
+            try {
+                const result = await codeReader.decodeFromImageUrl(canvas.toDataURL("image/jpeg", 0.92));
+                return result.getText();
+            } catch (e) { return null; }
+        }
+
+        async function tryDecodeFrame(video) {
+            const W = video.videoWidth, H = video.videoHeight;
+            const full = document.createElement("canvas");
+            full.width = W; full.height = H;
+            full.getContext("2d").drawImage(video, 0, 0);
+
+            // มุมมอง 1: ภาพเต็ม
+            let text = await decodeCanvas(full);
+            if (text) return text;
+
+            // มุมมอง 2: crop เฉพาะบริเวณกรอบไกด์ (ตัด noise รอบข้างออก ช่วย binarizer มาก)
+            {
+                const cx = Math.floor(W * 0.06), cy = Math.floor(H * 0.24);
+                const cw = W - cx * 2, ch = H - cy * 2;
+                const crop = document.createElement("canvas");
+                crop.width = cw; crop.height = ch;
+                crop.getContext("2d").drawImage(full, cx, cy, cw, ch, 0, 0, cw, ch);
+                text = await decodeCanvas(crop);
+                if (text) return text;
+            }
+
+            // มุมมอง 3: crop กลางภาพแล้วขยาย 2 เท่า (ช่วยกรณี barcode เล็ก/อยู่ไกล)
+            {
+                const cx = Math.floor(W * 0.18), cy = Math.floor(H * 0.30);
+                const cw = W - cx * 2, ch = H - cy * 2;
+                const zoom = document.createElement("canvas");
+                zoom.width = cw * 2; zoom.height = ch * 2;
+                const ctx = zoom.getContext("2d");
+                ctx.imageSmoothingEnabled = true;
+                ctx.drawImage(full, cx, cy, cw, ch, 0, 0, cw * 2, ch * 2);
+                text = await decodeCanvas(zoom);
+                if (text) return text;
+            }
+
+            return null;
+        }
+
         async function captureScan() {
             const video = document.getElementById("video");
             const btn = document.getElementById("capture-btn");
             if (!scanning || !video.videoWidth) { toast("กล้องยังไม่พร้อม"); return; }
+            if (capturing) return;
+            capturing = true;
             btn.disabled = true;
+            const origLabel = btn.textContent;
+            btn.textContent = "⏳ กำลังสแกน...";
             try {
-                const canvas = document.createElement("canvas");
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                canvas.getContext("2d").drawImage(video, 0, 0);
-                const result = codeReader.decodeFromCanvas(canvas);   // throw ถ้าไม่เจอ barcode ในภาพ
-                const text = result.getText();
-                if (navigator.vibrate) navigator.vibrate(80);
-                showResult(text);
-                document.getElementById("manual-input").value = text;
-            } catch (err) {
-                toast("ไม่พบ barcode ในภาพ — ขยับให้ชัดขึ้นแล้วกดใหม่");
+                // ลองซ้ำสูงสุด 12 รอบ (~4 วินาที) — ครอบคลุมจังหวะกล้องโฟกัสเข้า
+                for (let i = 0; i < 12; i++) {
+                    const text = await tryDecodeFrame(video);
+                    if (text) {
+                        if (navigator.vibrate) navigator.vibrate(80);
+                        showResult(text);
+                        document.getElementById("manual-input").value = text;
+                        return;
+                    }
+                    await new Promise(r => setTimeout(r, 150));
+                }
+                toast("ไม่พบ barcode — ขยับเข้าใกล้ให้ barcode กว้างเกือบเต็มกรอบ แล้วลองใหม่");
             } finally {
+                capturing = false;
                 btn.disabled = false;
+                btn.textContent = origLabel;
             }
         }
 
