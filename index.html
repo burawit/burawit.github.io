@@ -565,7 +565,8 @@
 
         /* ---------- ดึงข้อมูลแท็บใดๆ จาก Google Sheets (gviz JSON, sheet ต้อง public read) ---------- */
         async function fetchSheet(sheetName) {
-            const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+            // headers=1 บังคับให้แถวแรกเป็น header เสมอ (กัน gviz เดา header ผิด)
+            const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&headers=1&sheet=${encodeURIComponent(sheetName)}`;
             const res = await fetch(url);
             const text = await res.text();
             // gviz ห่อ JSON ด้วย function call — ตัดหัวท้ายออก
@@ -889,16 +890,22 @@
         async function startScanner() {
             if (scanning) return;
             try {
-                codeReader = new ZXing.BrowserMultiFormatReader();
+                // TRY_HARDER ช่วย decode ภาพนิ่งเฟรมเดียว (ยังรองรับทุก format เหมือนเดิม)
+                const hints = new Map();
+                hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+                codeReader = new ZXing.BrowserMultiFormatReader(hints);
                 const devices = await codeReader.listVideoInputDevices();
                 // เลือกกล้องหลัง (มักเป็นตัวสุดท้าย หรือชื่อมี back/rear)
                 let deviceId = devices.length ? devices[devices.length - 1].deviceId : null;
                 const back = devices.find(d => /back|rear|environment/i.test(d.label));
                 if (back) deviceId = back.deviceId;
 
-                // เปิดกล้องแสดง preview อย่างเดียว — ยังไม่ decode
+                // เปิดกล้องแสดง preview อย่างเดียว — ขอความละเอียดสูง เพราะ decode จากภาพนิ่งต้องการภาพคม
                 cameraStream = await navigator.mediaDevices.getUserMedia({
-                    video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }
+                    video: Object.assign(
+                        deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" },
+                        { width: { ideal: 1920 }, height: { ideal: 1080 } }
+                    )
                 });
                 const video = document.getElementById("video");
                 video.srcObject = cameraStream;
