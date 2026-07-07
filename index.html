@@ -900,68 +900,25 @@
         }
 
         /* ---------- Barcode Scanner (ZXing) ---------- */
-        let lastScan = { code: "", t: 0 };
-        let videoTrack = null;
-        let torchOn = false;
-
-        function onScanResult(result) {
-            if (!result) return;
-            const text = result.getText();
-            // กันสแกนซ้ำรัวๆ: code เดิมภายใน 2.5 วิ ให้ข้าม
-            const now = Date.now();
-            if (text === lastScan.code && now - lastScan.t < 2500) return;
-            lastScan = { code: text, t: now };
-            showResult(text);
-            document.getElementById("manual-input").value = text;
-        }
-
         async function startScanner() {
             if (scanning) return;
-            const hint = document.getElementById("video-hint");
             try {
-                // ครอบคลุม format 1D ที่พบบน asset label (รวม ITF/CODE_93 ที่ label ตัวเลขล้วนชอบใช้)
-                const hints = new Map();
-                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-                    ZXing.BarcodeFormat.CODE_128,
-                    ZXing.BarcodeFormat.CODE_39,
-                    ZXing.BarcodeFormat.CODE_93,
-                    ZXing.BarcodeFormat.ITF,
-                    ZXing.BarcodeFormat.CODABAR,
-                    ZXing.BarcodeFormat.EAN_13,
-                    ZXing.BarcodeFormat.EAN_8,
-                    ZXing.BarcodeFormat.UPC_A,
-                    ZXing.BarcodeFormat.QR_CODE,
-                ]);
-                hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-                codeReader = new ZXing.BrowserMultiFormatReader(hints);
-
-                // วิธีที่ 1: constraints กล้องหลัง + ความละเอียดสูง (ไม่มี focusMode — บางเครื่องไม่รองรับ)
-                try {
-                    await codeReader.decodeFromConstraints({
-                        video: {
-                            facingMode: { ideal: "environment" },
-                            width: { ideal: 1920 },
-                            height: { ideal: 1080 },
-                        }
-                    }, "video", onScanResult);
-                } catch (e1) {
-                    // วิธีที่ 2 (fallback): เลือก device ตรงๆ แบบเวอร์ชันแรกที่เคยใช้ได้
-                    const devices = await codeReader.listVideoInputDevices();
-                    let deviceId = devices.length ? devices[devices.length - 1].deviceId : null;
-                    const back = devices.find(d => /back|rear|environment/i.test(d.label));
-                    if (back) deviceId = back.deviceId;
-                    await codeReader.decodeFromVideoDevice(deviceId, "video", onScanResult);
-                }
+                codeReader = new ZXing.BrowserMultiFormatReader();
+                const devices = await codeReader.listVideoInputDevices();
+                // เลือกกล้องหลัง (มักเป็นตัวสุดท้าย หรือชื่อมี back/rear)
+                let deviceId = devices.length ? devices[devices.length - 1].deviceId : null;
+                const back = devices.find(d => /back|rear|environment/i.test(d.label));
+                if (back) deviceId = back.deviceId;
                 scanning = true;
-
-                // เก็บ video track ไว้ควบคุมไฟฉาย + ขอโฟกัสต่อเนื่องแบบ optional (fail ได้ ไม่เป็นไร)
-                const stream = document.getElementById("video").srcObject;
-                videoTrack = stream ? stream.getVideoTracks()[0] : null;
-                setupTorchButton();
-                hint.textContent = "จ่อกล้องให้ barcode เต็มกรอบ ห่างประมาณ 10-20 ซม.";
+                codeReader.decodeFromVideoDevice(deviceId, "video", (result, err) => {
+                    if (result) {
+                        showResult(result.getText());
+                        document.getElementById("manual-input").value = result.getText();
+                    }
+                });
+                document.getElementById("video-hint").textContent = "จ่อกล้องไปที่ Barcode / QR Code";
             } catch (err) {
-                scanning = false;
-                hint.textContent = "เปิดกล้องไม่ได้ (" + (err && err.name ? err.name : "error") + ") — ใช้ช่องพิมพ์ด้านล่างแทน";
+                document.getElementById("video-hint").textContent = "เปิดกล้องไม่ได้ — ใช้ช่องพิมพ์ด้านล่างแทน";
             }
         }
 
