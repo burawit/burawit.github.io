@@ -91,9 +91,26 @@
 
         .scan-frame {
             position: absolute;
-            inset: 15% 12%;
+            inset: 28% 8%;
             border: none;
             pointer-events: none;
+        }
+
+        #torch-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: 0;
+            background: rgba(0, 0, 0, .5);
+            font-size: 20px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 5;
         }
 
         .scan-frame::before,
@@ -441,6 +458,7 @@
             <div id="video-wrap">
                 <video id="video" playsinline muted></video>
                 <div class="scan-frame"><b></b></div>
+                <button id="torch-btn" onclick="toggleTorch()" aria-label="ไฟฉาย">🔦</button>
                 <p id="video-hint">จ่อกล้องไปที่ Barcode / QR Code</p>
             </div>
             <div class="manual-row">
@@ -601,15 +619,19 @@
                 .map(r => r["room_name"]);
         }
 
-        /* ---------- ค้นหา asset จาก barcode / ข้อความ ---------- */
+        /* ---------- ค้นหา asset จาก barcode / ข้อความ ----------
+           normalize: ตัดขีด/จุด/ช่องว่างออกก่อนเทียบ
+           เช่น label "1-174-03253-0000" จะ match กับ "1174032530000" ใน Sheet */
+        function norm(s) {
+            return String(s ?? "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+        }
         function findAsset(code) {
-            const c = code.trim().toLowerCase();
+            const c = norm(code);
+            if (!c) return null;
             return assets.find(a =>
-                (a["Asset"] || "").toLowerCase() === c ||
-                (a["S/N"] || "").toLowerCase() === c
+                norm(a["Asset"]) === c || norm(a["S/N"]) === c
             ) || assets.find(a =>
-                (a["Asset"] || "").toLowerCase().includes(c) ||
-                (a["S/N"] || "").toLowerCase().includes(c)
+                (c.length >= 4) && (norm(a["Asset"]).includes(c) || norm(a["S/N"]).includes(c))
             );
         }
 
@@ -854,31 +876,77 @@
             if (hit) { current = hit; openDetail(); }
         }
 
-        /* ---------- Barcode Scanner (ZXing) ---------- */
+        /* ---------- Barcode Scanner (ZXing) — ปรับให้อ่าน label แบบ Code 128/39 ง่ายขึ้น ---------- */
+        let lastScan = { code: "", t: 0 };
+        let videoTrack = null;
+        let torchOn = false;
+
         async function startScanner() {
             if (scanning) return;
             try {
-                codeReader = new ZXing.BrowserMultiFormatReader();
-                const devices = await codeReader.listVideoInputDevices();
-                // เลือกกล้องหลัง (มักเป็นตัวสุดท้าย หรือชื่อมี back/rear)
-                let deviceId = devices.length ? devices[devices.length - 1].deviceId : null;
-                const back = devices.find(d => /back|rear|environment/i.test(d.label));
-                if (back) deviceId = back.deviceId;
-                scanning = true;
-                codeReader.decodeFromVideoDevice(deviceId, "video", (result, err) => {
-                    if (result) {
-                        showResult(result.getText());
-                        document.getElementById("manual-input").value = result.getText();
+                // จำกัด format เฉพาะที่ใช้จริงบน asset label → decode เร็ว/แม่นขึ้นมาก
+                const hints = new Map();
+                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                    ZXing.BarcodeFormat.CODE_128,
+                    ZXing.BarcodeFormat.CODE_39,
+                    ZXing.BarcodeFormat.QR_CODE,
+                    ZXing.BarcodeFormat.EAN_13,
+                ]);
+                hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+                codeReader = new ZXing.BrowserMultiFormatReader(hints);
+
+                // บังคับกล้องหลัง + ความละเอียดสูง + โฟกัสต่อเนื่อง (barcode เส้นถี่ต้องการภาพชัด)
+                const constraints = {
+                    video: {
+                        facingMode: { ideal: "environment" },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                        advanced: [{ focusMode: "continuous" }],
                     }
+                };
+                scanning = true;
+                await codeReader.decodeFromConstraints(constraints, "video", (result) => {
+                    if (!result) return;
+                    const text = result.getText();
+                    // กันสแกนซ้ำรัวๆ: code เดิมภายใน 2.5 วิ ให้ข้าม
+                    const now = Date.now();
+                    if (text === lastScan.code && now - lastScan.t < 2500) return;
+                    lastScan = { code: text, t: now };
+                    showResult(text);
+                    document.getElementById("manual-input").value = text;
                 });
-                document.getElementById("video-hint").textContent = "จ่อกล้องไปที่ Barcode / QR Code";
+
+                // เก็บ video track ไว้ควบคุมไฟฉาย
+                const video = document.getElementById("video");
+                const stream = video.srcObject;
+                videoTrack = stream ? stream.getVideoTracks()[0] : null;
+                setupTorchButton();
+                document.getElementById("video-hint").textContent = "จ่อกล้องให้ barcode เต็มกรอบ ห่างประมาณ 10-20 ซม.";
             } catch (err) {
                 document.getElementById("video-hint").textContent = "เปิดกล้องไม่ได้ — ใช้ช่องพิมพ์ด้านล่างแทน";
             }
         }
 
+        /* ---------- ปุ่มไฟฉาย (ถ้ากล้องรองรับ) ---------- */
+        function setupTorchButton() {
+            const btn = document.getElementById("torch-btn");
+            if (!btn || !videoTrack) return;
+            const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+            btn.style.display = caps.torch ? "flex" : "none";
+        }
+
+        async function toggleTorch() {
+            if (!videoTrack) return;
+            try {
+                torchOn = !torchOn;
+                await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+                document.getElementById("torch-btn").style.background = torchOn ? "#facc15" : "rgba(0,0,0,.5)";
+            } catch (e) { toast("เปิดไฟฉายไม่ได้บนอุปกรณ์นี้"); }
+        }
+
         function stopScanner() {
             if (codeReader) { codeReader.reset(); scanning = false; }
+            videoTrack = null; torchOn = false;
         }
 
         /* ---------- Navigation ---------- */
