@@ -555,10 +555,22 @@
         /* ================================================================
            CONFIG — แก้ 2 ค่านี้ก่อนใช้งาน
            ================================================================ */
-        const SHEET_ID = "PUT_YOUR_GOOGLE_SHEET_ID_HERE";   // จาก URL ของ Google Sheets
+        const SHEET_ID = "1d426tLoj0aZ3ViVFuzQCbAGUdibegsrueTidV3eqkCA";   // จาก URL ของ Google Sheets
         const SHEET_NAME = "Assets";                           // ชื่อแท็บใน Sheet
         const ROOMS_NAME = "Rooms";                            // แท็บ master ห้อง (site_id, room_name) — ไม่มีก็ได้
-        const SCRIPT_URL = "PUT_YOUR_APPS_SCRIPT_URL_HERE";    // Web App URL จาก Apps Script (สำหรับบันทึก)
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwbCiq0nwkdmIqtQVgwrlb1uxJq9uJ2rGbwniMrVNpGcpvbA9TYQhZkx8fLznGEiOA/exec";    // Web App URL จาก Apps Script (สำหรับบันทึก)
+
+        /* ชื่อคอลัมน์ในแท็บ Assets — แก้ฝั่งขวาให้ตรงกับ header ใน Sheet ของคุณ */
+        const COLS = {
+            asset: "asset",           // เลข asset (ใช้เป็น key หลัก)
+            site: "site_id",         // รหัส site เช่น CTR, LPN
+            detail: "detail",          // รายการอุปกรณ์
+            sn: "serial_number",   // Serial Number
+            app: "application",     // Application
+            room: "room",            // ห้อง (ผูกกับ Rooms.room_name)
+            status: "status",          // สถานะอุปกรณ์
+            note: "note",            // หมายเหตุ
+        };
         /* ================================================================ */
 
         let assets = [];          // ข้อมูลทั้งหมดจาก Google Sheets
@@ -585,7 +597,18 @@
         async function loadAssets() {
             const sub = document.getElementById("header-sub");
             try {
-                assets = (await fetchSheet(SHEET_NAME)).filter(a => a["Asset"] || a["S/N"]);
+                // remap header จาก Sheet → key ภายในแอป (Asset, Site_Id, ...)
+                const raw = await fetchSheet(SHEET_NAME);
+                assets = raw.map(r => ({
+                    "Asset": r[COLS.asset] ?? "",
+                    "Site_Id": r[COLS.site] ?? "",
+                    "รายการอุปกรณ์": r[COLS.detail] ?? "",
+                    "S/N": r[COLS.sn] ?? "",
+                    "Application": r[COLS.app] ?? "",
+                    "Room": r[COLS.room] ?? "",
+                    "Status": r[COLS.status] ?? "",
+                    "Note": r[COLS.note] ?? "",
+                })).filter(a => a["Asset"] || a["S/N"]);
                 sub.textContent = `${assets.length} รายการ · อัปเดต ${new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}`;
                 try { localStorage.setItem("assets_cache", JSON.stringify(assets)); } catch (e) { }
             } catch (err) {
