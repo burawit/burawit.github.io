@@ -96,23 +96,6 @@
             pointer-events: none;
         }
 
-        #torch-btn {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 42px;
-            height: 42px;
-            border-radius: 50%;
-            border: 0;
-            background: rgba(0, 0, 0, .5);
-            font-size: 20px;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            z-index: 5;
-        }
-
         .scan-frame::before,
         .scan-frame::after,
         .scan-frame b::before,
@@ -458,9 +441,10 @@
             <div id="video-wrap">
                 <video id="video" playsinline muted></video>
                 <div class="scan-frame"><b></b></div>
-                <button id="torch-btn" onclick="toggleTorch()" aria-label="ไฟฉาย">🔦</button>
-                <p id="video-hint">จ่อกล้องไปที่ Barcode / QR Code</p>
+                <p id="video-hint">จ่อ barcode ให้ชัดในกรอบ แล้วกดปุ่มสแกน</p>
             </div>
+            <button id="capture-btn" class="btn btn-primary" style="margin:0 0 12px;" onclick="captureScan()">📷 สแกน
+                Barcode</button>
             <div class="manual-row">
                 <input id="manual-input" type="text" placeholder="หรือพิมพ์ Asset No. / S/N เอง" autocomplete="off">
                 <button class="btn btn-primary" style="width:auto;margin:0;padding:0 18px;"
@@ -899,7 +883,9 @@
             if (hit) { current = hit; openDetail(); }
         }
 
-        /* ---------- Barcode Scanner (ZXing) ---------- */
+        /* ---------- Barcode Scanner (ZXing) — เปิดกล้องแบบเดิม, decode เฉพาะตอนกดปุ่มถ่าย ---------- */
+        let cameraStream = null;
+
         async function startScanner() {
             if (scanning) return;
             try {
@@ -909,39 +895,53 @@
                 let deviceId = devices.length ? devices[devices.length - 1].deviceId : null;
                 const back = devices.find(d => /back|rear|environment/i.test(d.label));
                 if (back) deviceId = back.deviceId;
-                scanning = true;
-                codeReader.decodeFromVideoDevice(deviceId, "video", (result, err) => {
-                    if (result) {
-                        showResult(result.getText());
-                        document.getElementById("manual-input").value = result.getText();
-                    }
+
+                // เปิดกล้องแสดง preview อย่างเดียว — ยังไม่ decode
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }
                 });
-                document.getElementById("video-hint").textContent = "จ่อกล้องไปที่ Barcode / QR Code";
+                const video = document.getElementById("video");
+                video.srcObject = cameraStream;
+                await video.play();
+                scanning = true;
+                document.getElementById("video-hint").textContent = "จ่อ barcode ให้ชัดในกรอบ แล้วกดปุ่มสแกน";
             } catch (err) {
+                scanning = false;
                 document.getElementById("video-hint").textContent = "เปิดกล้องไม่ได้ — ใช้ช่องพิมพ์ด้านล่างแทน";
             }
         }
 
-        /* ---------- ปุ่มไฟฉาย (ถ้ากล้องรองรับ) ---------- */
-        function setupTorchButton() {
-            const btn = document.getElementById("torch-btn");
-            if (!btn || !videoTrack) return;
-            const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-            btn.style.display = caps.torch ? "flex" : "none";
-        }
-
-        async function toggleTorch() {
-            if (!videoTrack) return;
+        /* กดปุ่มถ่าย → จับภาพจาก video 1 เฟรม → decode เฉพาะภาพนั้น */
+        async function captureScan() {
+            const video = document.getElementById("video");
+            const btn = document.getElementById("capture-btn");
+            if (!scanning || !video.videoWidth) { toast("กล้องยังไม่พร้อม"); return; }
+            btn.disabled = true;
             try {
-                torchOn = !torchOn;
-                await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-                document.getElementById("torch-btn").style.background = torchOn ? "#facc15" : "rgba(0,0,0,.5)";
-            } catch (e) { toast("เปิดไฟฉายไม่ได้บนอุปกรณ์นี้"); }
+                const canvas = document.createElement("canvas");
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext("2d").drawImage(video, 0, 0);
+                const result = codeReader.decodeFromCanvas(canvas);   // throw ถ้าไม่เจอ barcode ในภาพ
+                const text = result.getText();
+                if (navigator.vibrate) navigator.vibrate(80);
+                showResult(text);
+                document.getElementById("manual-input").value = text;
+            } catch (err) {
+                toast("ไม่พบ barcode ในภาพ — ขยับให้ชัดขึ้นแล้วกดใหม่");
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         function stopScanner() {
-            if (codeReader) { codeReader.reset(); scanning = false; }
-            videoTrack = null; torchOn = false;
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
+            const video = document.getElementById("video");
+            if (video) video.srcObject = null;
+            scanning = false;
         }
 
         /* ---------- Navigation ---------- */
