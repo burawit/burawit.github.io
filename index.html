@@ -4,15 +4,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#14532d">
+    <meta name="theme-color" content="#16437E">
     <title>Asset Scanner</title>
     <link rel="manifest"
-        href='data:application/json,{"name":"Asset Scanner","short_name":"Assets","start_url":".","display":"standalone","background_color":"%23fafaf7","theme_color":"%2314532d"}'>
+        href='data:application/json,{"name":"Asset Scanner","short_name":"Assets","start_url":".","display":"standalone","background_color":"%23fafaf7","theme_color":"%2316437E"}'>
     <style>
         :root {
-            --green-900: #14532d;
-            --green-700: #15803d;
-            --green-100: #dcfce7;
+            /* โทนสีตาม logo AEROTHAI: น้ำเงิน navy + แดง */
+            --green-900: #16437E;
+            --green-700: #1E5AA8;
+            --green-100: #DBE8F8;
+            --aero-red: #D6001C;
             --ink: #1c1917;
             --ink-2: #57534e;
             --ink-3: #a8a29e;
@@ -55,7 +57,7 @@
 
         header p {
             font-size: 12px;
-            color: #bbf7d0;
+            color: #bcd7f5;
             margin-top: 2px;
         }
 
@@ -220,8 +222,8 @@
         }
 
         .badge.ok {
-            background: var(--green-100);
-            color: var(--green-900);
+            background: #dcfce7;
+            color: #166534;
         }
 
         .badge.warn {
@@ -255,6 +257,10 @@
         .btn-primary {
             background: var(--green-900);
             color: #fff;
+        }
+
+        #capture-btn {
+            background: var(--aero-red);
         }
 
         .btn-ghost {
@@ -536,6 +542,16 @@
                     <input id="add-rack" type="text" placeholder="None">
                 </div>
                 <div class="field">
+                    <label>สถานะอุปกรณ์</label>
+                    <select id="add-status">
+                        <option value="ใช้งานปกติ">ใช้งานปกติ</option>
+                        <option value="ชำรุด">ชำรุด</option>
+                        <option value="รอซ่อม">รอซ่อม</option>
+                        <option value="รอตัดจำหน่าย">รอตัดจำหน่าย</option>
+                        <option value="จำหน่ายออก">จำหน่ายออก</option>
+                    </select>
+                </div>
+                <div class="field">
                     <label>หมายเหตุ</label>
                     <textarea id="add-note" rows="2" placeholder="บันทึกเพิ่มเติม..."></textarea>
                 </div>
@@ -730,9 +746,17 @@
         /* ---------- แสดงผลลัพธ์บนหน้าสแกน ---------- */
         let scanMatches = [];
 
+        function siteLoc(a) {
+            const parts = [];
+            if (a["Room"]) parts.push(a["Room"]);
+            if (a["Rack"] && a["Rack"] !== "None") parts.push(a["Rack"]);
+            return esc(a["Site_Id"]) + (parts.length ? ` (${esc(parts.join(" / "))})` : "");
+        }
+
         function showResult(code) {
             const box = document.getElementById("scan-result");
             const matches = findAssetsAll(code);
+            lastNotFound = code;   // เก็บ code ไว้ prefill ปุ่มเพิ่ม ทุกกรณี
 
             if (matches.length === 1) {
                 const hit = matches[0];
@@ -742,9 +766,11 @@
       <div class="card" style="border-color:var(--green-700);">
         <div class="frow"><span class="k">Asset No.</span><span class="v" style="color:var(--green-900)">${esc(hit["Asset"])}</span></div>
         <div class="frow"><span class="k">รายการ</span><span class="v">${esc(hit["รายการอุปกรณ์"])}</span></div>
-        <div class="frow"><span class="k">Site</span><span class="v">${esc(hit["Site_Id"])}</span></div>
+        <div class="frow"><span class="k">S/N</span><span class="v">${esc(hit["S/N"] || "-")}</span></div>
+        <div class="frow"><span class="k">Site</span><span class="v">${siteLoc(hit)}</span></div>
         <div class="frow"><span class="k">สถานะ</span>${statusBadge(hit["Status"] || "พบข้อมูล")}</div>
         <button class="btn btn-primary" onclick="openDetail()">ดูรายละเอียด</button>
+        <button class="btn btn-ghost" onclick="openAdd()">➕ เพิ่มเครื่องใหม่ใช้เลขนี้ (ทดแทนตัวเดิม)</button>
       </div>`;
             } else if (matches.length > 1) {
                 // เลข asset ซ้ำได้ (ตัวเก่ารอตัดจำหน่าย / ตัวใหม่ใช้เลขเดิม) → ให้เลือกตัวที่ต้องการ
@@ -757,10 +783,11 @@
           <div class="log-item" style="cursor:pointer" onclick="openMatch(${i})">
             <div class="log-body">
               <p>${esc(a["รายการอุปกรณ์"] || "(ไม่มีชื่อรายการ)")}</p>
-              <span>S/N: ${esc(a["S/N"] || "-")} · ${esc(a["Site_Id"])}${a["Rack"] && a["Rack"] !== "None" ? " · " + esc(a["Rack"]) : ""}</span>
+              <span>S/N: ${esc(a["S/N"] || "-")} · ${siteLoc(a)}</span>
             </div>
             ${statusBadge(a["Status"] || "-").replace('class="v"', 'class="v" style="margin-left:auto;flex-shrink:0;"')}
           </div>`).join("")}
+        <button class="btn btn-ghost" onclick="openAdd()">➕ เพิ่มเครื่องใหม่ใช้เลขนี้ (ทดแทนตัวเดิม)</button>
       </div>`;
             } else {
                 lastNotFound = code;
@@ -965,6 +992,7 @@
             document.getElementById("add-sn").value = "";
             document.getElementById("add-detail").value = "";
             document.getElementById("add-app").value = "";
+            document.getElementById("add-status").value = "ใช้งานปกติ";
             document.getElementById("add-note").value = "";
 
             const siteSel = document.getElementById("add-site");
@@ -1040,16 +1068,19 @@
                 site: document.getElementById("add-site").value,
                 room: document.getElementById("add-room").value.trim(),
                 rack: document.getElementById("add-rack").value.trim() || "None",
+                status: document.getElementById("add-status").value,
                 note: document.getElementById("add-note").value,
                 user: getUser(),
             };
             const btn = document.getElementById("add-save-btn");
             btn.disabled = true;
+            const origLabel = btn.textContent;
+            btn.textContent = "⏳ กำลังบันทึก...";   // รอ Apps Script ตอบ (ปกติ 1-3 วิ)
             await postToSheet(payload, "เพิ่ม Asset แล้ว ✓", () => {
                 const obj = {
                     "Asset": asset, "Site_Id": payload.site, "รายการอุปกรณ์": payload.detail,
                     "S/N": sn, "Application": payload.app, "Room": payload.room,
-                    "Rack": payload.rack, "Status": "ใช้งานปกติ", "Note": payload.note,
+                    "Rack": payload.rack, "Status": payload.status, "Note": payload.note,
                 };
                 assets.push(obj);
                 current = obj;
@@ -1057,6 +1088,7 @@
                 openDetail();
             });
             btn.disabled = false;
+            btn.textContent = origLabel;
         }
 
         async function saveEdit() {
@@ -1138,10 +1170,8 @@
     </div>`).join("");
         }
 
-        /* ---------- หน้ารายการทั้งหมด (lazy load ทีละ 50 รายการตอน scroll) ---------- */
-        const LIST_CHUNK = 50;
-        let listFiltered = [];   // ผลการกรองทั้งหมด (search กรองจากข้อมูลเต็มเสมอ)
-        let listShown = 0;       // จำนวนที่วาดไปแล้ว
+        /* ---------- หน้ารายการทั้งหมด (แสดงครบทุกรายการ) ---------- */
+        let listFiltered = [];   // ผลการกรองล่าสุด (ใช้อ้างอิงตอนกดเปิดรายการ)
 
         function listItemHtml(a, idx) {
             return `
@@ -1156,42 +1186,14 @@
         function renderList(filter) {
             const box = document.getElementById("list-body");
             const f = (filter || "").toLowerCase();
-            // กรองจากข้อมูลทั้งหมดเสมอ — lazy load มีผลแค่ตอนวาด ไม่กระทบการค้นหา
             listFiltered = assets.filter(a =>
                 !f || Object.values(a).some(v => String(v).toLowerCase().includes(f))
             );
-            listShown = 0;
             if (!listFiltered.length) { box.innerHTML = `<p class="empty">ไม่พบรายการ</p>`; return; }
-            box.innerHTML = "";
-            appendListChunk();
+            box.innerHTML =
+                listFiltered.map((a, i) => listItemHtml(a, i)).join("") +
+                `<p class="empty" style="padding:14px 0;">ทั้งหมด ${listFiltered.length} รายการ</p>`;
         }
-
-        function appendListChunk() {
-            const box = document.getElementById("list-body");
-            const next = listFiltered.slice(listShown, listShown + LIST_CHUNK);
-            if (!next.length) return;
-            const start = listShown;
-            const old = document.getElementById("list-more");
-            if (old) { listObserver.unobserve(old); old.remove(); }
-            box.insertAdjacentHTML("beforeend",
-                next.map((a, i) => listItemHtml(a, start + i)).join(""));
-            listShown += next.length;
-
-            // แถบบอกสถานะท้ายรายการ — ใช้เป็น sentinel ให้ observer เฝ้าดู
-            box.insertAdjacentHTML("beforeend",
-                listShown < listFiltered.length
-                    ? `<p id="list-more" class="empty" style="padding:14px 0;">แสดง ${listShown} จาก ${listFiltered.length} — เลื่อนลงเพื่อโหลดต่อ</p>`
-                    : `<p id="list-more" class="empty" style="padding:14px 0;">ครบ ${listFiltered.length} รายการ</p>`);
-            if (listShown < listFiltered.length) {
-                listObserver.observe(document.getElementById("list-more"));
-            }
-        }
-
-        /* โหลดเพิ่มเมื่อแถบท้ายลิสต์โผล่เข้าจอ — ทำงานไม่ว่าตัว scroll จะเป็น element ไหน */
-        const listObserver = new IntersectionObserver((entries) => {
-            if (!document.getElementById("screen-list").classList.contains("active")) return;
-            if (entries.some(e => e.isIntersecting)) appendListChunk();
-        }, { rootMargin: "300px" });
 
         function openFromListIdx(idx) {
             const hit = listFiltered[idx];
