@@ -855,7 +855,7 @@
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="openEdit()">แก้ไข</button>
-      <button class="btn btn-primary" onclick="checkAsset()">ตรวจสอบแล้ว ✓</button>
+      <button class="btn btn-primary" id="check-btn" onclick="checkAsset()">ตรวจสอบแล้ว ✓</button>
     </div>
     <button class="btn btn-ghost" onclick="showScreen('scan')">← กลับไปสแกน</button>`;
             showScreen("detail");
@@ -1106,6 +1106,9 @@
                 note: document.getElementById("edit-note").value,
                 user: getUser(),
             };
+            const btn = document.getElementById("save-btn");
+            const origLabel = btn ? btn.textContent : "";
+            if (btn) { btn.disabled = true; btn.textContent = "⏳ กำลังบันทึกข้อมูล..."; }
             await postToSheet(payload, "บันทึกแล้ว ✓", () => {
                 current["Asset"] = newAsset;
                 current["Site_Id"] = payload.site;
@@ -1116,13 +1119,22 @@
                 addLocalLog("แก้ไข", current);
                 openDetail();
             });
+            if (btn) { btn.disabled = false; btn.textContent = origLabel; }
         }
 
         /* ---------- ปุ่มตรวจสอบแล้ว ---------- */
         async function checkAsset() {
             if (!current) return;
+            const btn = document.getElementById("check-btn");
+            const origLabel = btn ? btn.textContent : "";
+            if (btn) { btn.disabled = true; btn.textContent = "⏳ กำลังแก้สถานะการตรวจสอบ..."; }
             const payload = { action: "check", asset: current["Asset"], user: getUser() };
-            await postToSheet(payload, "บันทึกการตรวจสอบแล้ว ✓", () => addLocalLog("ตรวจสอบ", current));
+            await postToSheet(payload, "บันทึกการตรวจสอบแล้ว ✓", () => {
+                addLocalLog("ตรวจสอบ", current);
+                openDetail();   // วาดหน้าใหม่ให้ "ตรวจสอบล่าสุด" อัปเดตทันที
+            });
+            const btn2 = document.getElementById("check-btn");
+            if (btn2) { btn2.disabled = false; btn2.textContent = origLabel || "ตรวจสอบแล้ว ✓"; }
         }
 
         /* ---------- ส่งข้อมูลไป Apps Script ---------- */
