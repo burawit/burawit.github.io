@@ -473,6 +473,10 @@
                     <input id="edit-asset" type="text" placeholder="เช่น 1174032510000">
                 </div>
                 <div class="field">
+                    <label>Application</label>
+                    <input id="edit-app" type="text" placeholder="เช่น CMAL2CBMOP22">
+                </div>
+                <div class="field">
                     <label>สถานะอุปกรณ์</label>
                     <select id="edit-status">
                         <option value="ใช้งานปกติ">ใช้งานปกติ</option>
@@ -785,7 +789,7 @@
         <div class="frow"><span class="k">S/N</span><span class="v">${esc(hit["S/N"] || "-")}</span></div>
         <div class="frow"><span class="k">Site</span><span class="v">${siteLoc(hit)}</span></div>
         <div class="frow"><span class="k">สถานะ</span>${statusBadge(hit["Status"] || "พบข้อมูล")}</div>
-        <button class="btn btn-primary" onclick="openDetail()">ดูรายละเอียด</button>
+        <button class="btn btn-primary" onclick="openDetail('scan')">ดูรายละเอียด</button>
         <button class="btn btn-ghost" onclick="openAdd()">➕ เพิ่มเครื่องใหม่ใช้เลขนี้ (ทดแทนตัวเดิม)</button>
       </div>`;
             } else if (matches.length > 1) {
@@ -820,7 +824,7 @@
         }
 
         function openMatch(i) {
-            if (scanMatches[i]) { current = scanMatches[i]; openDetail(); }
+            if (scanMatches[i]) { current = scanMatches[i]; openDetail('scan'); }
         }
 
         function manualSearch() {
@@ -829,6 +833,8 @@
         }
 
         /* ---------- หน้ารายละเอียด ---------- */
+        let detailReturnTo = "scan";   // จำว่าเข้าหน้ารายละเอียดมาจากไหน (scan / list) เพื่อกดย้อนกลับถูกที่
+
         function statusBadge(status) {
             const s = status || "";
             if (!s || s === "-") return `<span class="v">-</span>`;
@@ -845,13 +851,15 @@
             } catch (e) { return null; }
         }
 
-        function openDetail() {
+        function openDetail(from) {
             if (!current) return;
+            if (from) detailReturnTo = from;   // ถ้าระบุมา (จากปุ่มที่เข้ามาจริงๆ) ให้จำไว้; ถ้าไม่ระบุ (เช่น หลังบันทึก) คงค่าตามเดิม
             const a = current;
             const last = lastCheckOf(a["Asset"]);
             const lastHtml = last
                 ? `<div class="frow"><span class="k">ตรวจสอบล่าสุด</span><span class="v">${new Date(last.t).toLocaleString("th-TH")}</span></div>`
                 : `<div class="frow"><span class="k">ตรวจสอบล่าสุด</span><span class="v"><span class="badge warn">ยังไม่เคยตรวจ (เครื่องนี้)</span></span></div>`;
+            const backLabel = detailReturnTo === "list" ? "← กลับไปรายการ" : "← กลับไปสแกน";
             document.getElementById("detail-body").innerHTML = `
     <div class="card">
       <h2>ข้อมูลอุปกรณ์</h2>
@@ -873,7 +881,7 @@
       <button class="btn btn-ghost" onclick="openEdit()">แก้ไข</button>
       <button class="btn btn-primary" id="check-btn" onclick="checkAsset()">ตรวจสอบแล้ว ✓</button>
     </div>
-    <button class="btn btn-ghost" onclick="showScreen('scan')">← กลับไปสแกน</button>`;
+    <button class="btn btn-ghost" onclick="showScreen(detailReturnTo)">${backLabel}</button>`;
             showScreen("detail");
         }
 
@@ -881,6 +889,7 @@
         function openEdit() {
             if (!current) return;
             document.getElementById("edit-asset").value = current["Asset"] || "";
+            document.getElementById("edit-app").value = current["Application"] || "";
             document.getElementById("edit-status").value = current["Status"] || "ใช้งานปกติ";
             document.getElementById("edit-note").value = current["Note"] || "";
 
@@ -1003,6 +1012,7 @@
         let lastNotFound = "";
 
         function openAdd() {
+            detailReturnTo = "scan";   // เพิ่ม asset ใหม่ทำได้จากหน้าสแกนเท่านั้น → บันทึกเสร็จกลับมาสแกนต่อ
             // prefill เลขที่สแกนได้ (ตัดขีด/ช่องว่างออก)
             document.getElementById("add-asset").value = (lastNotFound || "").replace(/[^0-9A-Za-z]/g, "");
             document.getElementById("add-sn").value = "";
@@ -1115,6 +1125,7 @@
                 key: current["Asset"],   // เลข asset เดิม — ใช้หาแถวใน Sheet
                 sn: current["S/N"],     // สำรอง: หาแถวด้วย S/N (กรณี asset เดิมว่าง/ซ้ำ)
                 asset: newAsset,           // เลข asset ใหม่ (แก้ได้)
+                app: document.getElementById("edit-app").value.trim(),
                 site: document.getElementById("edit-site").value,
                 status: document.getElementById("edit-status").value,
                 room: document.getElementById("edit-room").value.trim(),
@@ -1127,6 +1138,7 @@
             if (btn) { btn.disabled = true; btn.textContent = "⏳ กำลังบันทึกข้อมูล..."; }
             await postToSheet(payload, "บันทึกแล้ว ✓", () => {
                 current["Asset"] = newAsset;
+                current["Application"] = payload.app;
                 current["Site_Id"] = payload.site;
                 current["Status"] = payload.status;
                 current["Room"] = payload.room;
@@ -1225,7 +1237,7 @@
 
         function openFromListIdx(idx) {
             const hit = listFiltered[idx];
-            if (hit) { current = hit; openDetail(); }
+            if (hit) { current = hit; openDetail('list'); }
         }
 
         /* ---------- Barcode Scanner (ZXing) — เปิดกล้องแบบเดิม, decode เฉพาะตอนกดปุ่มถ่าย ---------- */
@@ -1359,9 +1371,11 @@
         function showScreen(name) {
             document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
             document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
-            const map = { scan: "scan", detail: "scan", edit: "scan", add: "scan", list: "list", history: "history" };
+            const map = { scan: "scan", list: "list", history: "history" };
+            // detail/edit/add ไม่มี tab ของตัวเอง — ไฮไลต์ nav ตามหน้าที่จะย้อนกลับไป (scan หรือ list)
+            const navTarget = (name === "detail" || name === "edit" || name === "add") ? detailReturnTo : (map[name] || name);
             document.getElementById("screen-" + name).classList.add("active");
-            const navBtn = document.getElementById("nav-" + (map[name] || name));
+            const navBtn = document.getElementById("nav-" + navTarget);
             if (navBtn) navBtn.classList.add("active");
             if (name === "scan") startScanner(); else stopScanner();
             if (name === "history") renderHistory();
