@@ -695,11 +695,17 @@
             }
         }
 
-        /* ---------- รายชื่อห้องของ site หนึ่งๆ ---------- */
+        /* ---------- รายชื่อห้องของ site — รวม master + ที่มีใช้จริงใน assets ---------- */
         function roomsOfSite(siteId) {
-            return rooms
-                .filter(r => (r["site_id"] || "").toLowerCase() === (siteId || "").toLowerCase())
+            const s = (siteId || "").toLowerCase();
+            const fromMaster = rooms
+                .filter(r => (r["site_id"] || "").toLowerCase() === s)
                 .map(r => r["room_name"]);
+            // ห้องที่เคยพิมพ์เองแล้วบันทึกไว้ใน assets → ให้โผล่ใน dropdown ด้วย
+            const fromAssets = assets
+                .filter(a => (a["Site_Id"] || "").toLowerCase() === s && a["Room"])
+                .map(a => a["Room"]);
+            return [...new Set([...fromMaster, ...fromAssets])].sort();
         }
 
         /* ---------- โหลด master rack (แท็บ Racks: site_id, room_name, rack_name) — ไม่มีแท็บนี้ก็ข้าม ---------- */
@@ -712,13 +718,23 @@
             }
         }
 
-        /* ---------- รายชื่อ rack ของ site+ห้อง ---------- */
+        /* ---------- รายชื่อ rack ของ site+ห้อง — รวม master + ที่มีใช้จริงใน assets ---------- */
         function racksOf(siteId, roomName) {
-            return racks
+            const s = (siteId || "").toLowerCase();
+            const rm = (roomName || "").toLowerCase();
+            const fromMaster = racks
                 .filter(r =>
-                    (r["site_id"] || "").toLowerCase() === (siteId || "").toLowerCase() &&
-                    (r["room_name"] || "").toLowerCase() === (roomName || "").toLowerCase())
+                    (r["site_id"] || "").toLowerCase() === s &&
+                    (r["room_name"] || "").toLowerCase() === rm)
                 .map(r => r["rack_name"]);
+            // rack ที่เคยพิมพ์เองแล้วบันทึกไว้ใน assets → ให้โผล่ใน dropdown ด้วย
+            const fromAssets = assets
+                .filter(a =>
+                    (a["Site_Id"] || "").toLowerCase() === s &&
+                    (a["Room"] || "").toLowerCase() === rm &&
+                    a["Rack"] && a["Rack"] !== "None")
+                .map(a => a["Rack"]);
+            return [...new Set([...fromMaster, ...fromAssets])].sort();
         }
 
         /* ---------- ค้นหา asset จาก barcode / ข้อความ ----------
